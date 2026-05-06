@@ -95,13 +95,13 @@ Training augmentations were chosen with clinical plausibility in mind:
 | L1 regularisation       | 1e-5               | Promotes sparsity in weight magnitudes        |
 | Early stopping          | Patience 4 epochs  | Halts training when validation loss plateaus  |
 
-### Transfer Learning
+### Training Strategies Across Architectures
 
-ImageNet pre-training provides low-level edge and texture detectors that transfer effectively to X-ray images, despite the domain difference. Training from scratch on ~5,800 images would be data-insufficient for a 24M-parameter model.
+Three different architectures and training methodologies were explored to find the optimal balance between model capacity and generalisation:
 
-### Partial Freezing
-
-`layer1` (shallow edge detectors) was frozen throughout training. These features are generic and do not require domain adaptation. Freezing them reduces the number of trainable parameters, lowers the risk of overfitting, and speeds up training without measurably affecting test performance.
+- **Custom CNN (Trained from Scratch):** A bespoke architecture trained entirely from random initialization. This served as a baseline to understand the fundamental challenges of the dataset and to verify that our data augmentation and class-balancing strategies were effective before introducing complex pre-trained models.
+- **ResNet18 (Fully Fine-Tuned):** Initialised with ImageNet weights, all layers of the ResNet18 model were fully unfrozen and fine-tuned. Because it is a relatively smaller network (11M parameters), it was feasible to train the entire network to see how well it could adapt specifically to medical imagery. However, this approach resulted in significant overfitting (the largest train-test gap), as the model memorised training-specific noise without sufficient regularisation.
+- **ResNet50 (Partially Frozen):** For the larger ResNet50 model (24M parameters), fully fine-tuning on a small dataset (~5,800 images) would lead to severe overfitting. To counter this, a partial freezing strategy was adopted. The initial blocks (like `layer1`), which act as generic edge and texture detectors learned from ImageNet, were frozen. Only the deeper, more semantic layers and the custom classification head were updated. This drastically reduced the trainable parameter count, effectively regularising the network and yielding the best generalisation performance.
 
 ---
 
