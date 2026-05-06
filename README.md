@@ -4,7 +4,9 @@
 
 This project trains and serves a binary image classifier that detects pneumonia in paediatric chest X-rays. Early and accurate pneumonia detection is critical in resource-limited settings where radiologist access is constrained; an automated screening tool can triage high-risk cases for priority review.
 
-The dataset is the [Chest X-Ray Pneumonia dataset](https://www.kaggle.com/datasets/paultimothymooney/chest-xray-pneumonia) from Kaggle, containing approximately 5,800 frontal-view X-rays of children aged one to five. Positive (PNEUMONIA) cases outnumber negative (NORMAL) cases by roughly 3:1, which was addressed through weighted sampling and class-weighted loss during training.
+The dataset is the [Chest X-Ray Pneumonia dataset](https://www.kaggle.com/datasets/paultimothymooney/chest-xray-pneumonia) from Kaggle, containing approximately 5,800 frontal-view paediatric chest X‑rays (age range not explicitly specified in the dataset documentation). Positive (PNEUMONIA) cases outnumber negative (NORMAL) cases by roughly 3:1, which was addressed through weighted sampling and class-weighted loss during training.
+
+**Dataset Attribution:** Chest X-Ray Images (Pneumonia) by Paul Mooney, CC BY 4.0.
 
 ---
 
@@ -26,6 +28,7 @@ chest-xray-classifier/
 │   └── api.py           # FastAPI application
 ├── logs/
 │   └── predictions.log  # Created at runtime, not committed
+├── test_api.py          # Automated API test suite
 ├── venv/
 ├── .gitignore
 ├── Dockerfile
@@ -73,15 +76,17 @@ ResNet50 was selected as the production model for the following reasons:
 
 The 3:1 positive-to-negative ratio was addressed with two complementary mechanisms:
 
-- **WeightedRandomSampler** rebalances the mini-batch composition at the data-loading stage, ensuring the model sees a balanced distribution per epoch without duplicating samples in memory.
-- **Class-weighted cross-entropy loss** applies a higher penalty to errors on the minority class during the gradient update. Using both ensures the imbalance is corrected both in what the model sees and in how it is penalised for mistakes.
+- **WeightedRandomSampler** rebalances the mini-batch composition at the data-loading stage.
+- **Class-weighted cross-entropy loss** applies a higher penalty to errors on the minority class.
+
+This ensures the imbalance is addressed at both the data-level (sampling) and the loss-level (weighted penalty).
 
 ### Data Augmentation
 
 Training augmentations were chosen with clinical plausibility in mind:
 
 - **Random horizontal flip**: chest X-rays can be acquired from either side.
-- **Small random rotation (±10°)**: accounts for patient positioning variation.
+- **Small random rotation (±20°)**: accounts for patient positioning variation.
 - **Colour jitter (brightness, contrast)**: simulates variation across X-ray machines and exposure settings.
 - No vertical flips or extreme distortions, which would produce anatomically implausible images.
 
@@ -91,8 +96,7 @@ Training augmentations were chosen with clinical plausibility in mind:
 |-------------------------|--------------------|-----------------------------------------------|
 | Batch Normalisation     | After Linear(2048→512) | Stabilises activations, mild regulariser   |
 | Dropout                 | 0.5 and 0.3        | Prevents co-adaptation in the FC head         |
-| L2 weight decay         | 5e-4               | Shrinks weights toward zero globally          |
-| L1 regularisation       | 1e-5               | Promotes sparsity in weight magnitudes        |
+| L2 weight decay         | 5e-4               | Applied via AdamW optimizer to shrink weights |
 | Early stopping          | Patience 4 epochs  | Halts training when validation loss plateaus  |
 
 ### Training Strategies Across Architectures
@@ -162,6 +166,8 @@ curl "http://localhost:8000/predictions/history?limit=50"
 curl "http://localhost:8000/predictions/history?class_filter=PNEUMONIA&min_confidence=0.9&limit=20"
 ```
 
+> **Note on Authentication:** These endpoints are currently unauthenticated for easy local testing. For production deployments, you should add an API key mechanism, OAuth2, or place the API behind a reverse-proxy with rate-limiting.
+
 ---
 
 ## Testing
@@ -219,6 +225,8 @@ curl -X POST http://localhost:8000/predict \
 
 Every prediction appended to `logs/predictions.log` contains:
 
+> **Note:** The `logs/predictions.log` file will grow indefinitely. For a long-term production environment, we recommend implementing log rotation (e.g. via `logrotate`) or switching to a time-series database like InfluxDB or Prometheus.
+
 | Field             | Description                                              |
 |-------------------|----------------------------------------------------------|
 | `timestamp`       | UTC ISO-8601 time of the prediction                      |
@@ -253,7 +261,5 @@ curl "http://localhost:8000/predictions/history?class_filter=PNEUMONIA&min_confi
 
 - **Larger dataset**: train on NIH ChestX-ray14 (112,000 images, 14 pathologies) for broader coverage.
 - **Modern architectures**: benchmark EfficientNetV2 and Vision Transformers (ViT-B/16) against ResNet50.
-- **Robust evaluation**: replace the single train/test split with 5-fold cross-validation.
 - **Ensembling**: combine CNN, ResNet18, and ResNet50 predictions via soft voting.
-- **Explainability**: integrate Grad-CAM to generate heatmaps highlighting the lung regions driving each prediction.
 - **Continuous retraining**: build an MLOps pipeline that automatically retrains the model when drift is sustained beyond a configurable threshold.
