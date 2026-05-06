@@ -90,22 +90,51 @@ Training augmentations were chosen with clinical plausibility in mind:
 - **Colour jitter (brightness, contrast)**: simulates variation across X-ray machines and exposure settings.
 - No vertical flips or extreme distortions, which would produce anatomically implausible images.
 
-### Regularisation
+### Model Selection and Training Methodology
 
-| Technique               | Setting            | Purpose                                       |
-|-------------------------|--------------------|-----------------------------------------------|
-| Batch Normalisation     | After Linear(2048→512) | Stabilises activations, mild regulariser   |
-| Dropout                 | 0.5 and 0.3        | Prevents co-adaptation in the FC head         |
-| L2 weight decay         | 5e-4               | Applied via AdamW optimizer to shrink weights |
-| Early stopping          | Patience 4 epochs  | Halts training when validation loss plateaus  |
+Three distinct architectures were trained and evaluated to understand the trade‑offs between model capacity, transfer learning benefit, and overfitting risk on a moderately sized medical imaging dataset.
 
-### Training Strategies Across Architectures
+#### Custom CNN (Baseline)
+**Why used:** A convolutional neural network built from scratch, with four convolutional blocks (filters: 32 → 64 → 128 → 256) followed by a classifier head containing dense layers, Batch Normalisation, and Dropout (0.5 and 0.3). This model served as a lower‑bound baseline to assess the inherent difficulty of the classification task and to verify that data augmentation and class‑balancing strategies were effective before introducing pre‑trained models.
 
-Three different architectures and training methodologies were explored to find the optimal balance between model capacity and generalisation:
+**How trained:**
+- Initialised randomly (no pre‑training).
+- Trained for up to 15 epochs (fully completed).
+- Learning rate = 1e‑3.
+- L2 weight decay = 5e‑4, L1 regularisation = 1e‑5.
+- Weighted sampler and class‑weighted loss applied.
+- Early stopping with patience 4 (not triggered).
 
-- **Custom CNN (Trained from Scratch):** A bespoke architecture trained entirely from random initialization. This served as a baseline to understand the fundamental challenges of the dataset and to verify that our data augmentation and class-balancing strategies were effective before introducing complex pre-trained models.
-- **ResNet18 (Fully Fine-Tuned):** Initialised with ImageNet weights, all layers of the ResNet18 model were fully unfrozen and fine-tuned. Because it is a relatively smaller network (11M parameters), it was feasible to train the entire network to see how well it could adapt specifically to medical imagery. However, this approach resulted in significant overfitting (the largest train-test gap), as the model memorised training-specific noise without sufficient regularisation.
-- **ResNet50 (Partially Frozen):** For the larger ResNet50 model (24M parameters), fully fine-tuning on a small dataset (~5,800 images) would lead to severe overfitting. To counter this, a partial freezing strategy was adopted. The initial blocks (like `layer1`), which act as generic edge and texture detectors learned from ImageNet, were frozen. Only the deeper, more semantic layers and the custom classification head were updated. This drastically reduced the trainable parameter count, effectively regularising the network and yielding the best generalisation performance.
+#### ResNet18 (Full Fine‑Tuning)
+**Why used:** ResNet18 is a relatively lightweight (≈11M parameters) pre‑trained model that offers a good balance between representational power and training speed. All layers were fully fine‑tuned to assess how well a moderately sized pre‑trained network can adapt to chest X‑ray features without architectural modifications.
+
+**How trained:**
+- Initialised with ImageNet weights.
+- Standard ResNet18 architecture; final fully connected layer replaced with a new classifier (Linear 512→256→2) containing BatchNorm and Dropout.
+- Trained for up to 10 epochs (fully completed).
+- Learning rate = 1e‑3.
+- Same regularisation (L2, L1, Dropout, BatchNorm) and class‑balancing as the custom CNN.
+
+#### ResNet50 (Partial Freezing)
+**Why used:** ResNet50 has higher capacity (≈24M parameters), but full fine‑tuning on a dataset of only ≈5,800 images would risk severe overfitting. To retain the benefits of pre‑training while controlling overfitting, a partial freezing strategy was adopted: the early layers (`layer1`), which learn generic low‑level features (edges, textures), were frozen, while all subsequent layers and the new classifier head were fine‑tuned.
+
+**How trained:**
+- Initialised with ImageNet weights.
+- `layer1` parameters frozen; `requires_grad = False`.
+- New classifier head: `Linear(2048→512) → ReLU → BatchNorm → Dropout(0.5) → Linear(512→128) → ReLU → Dropout(0.3) → Linear(128→2)`.
+- Trained for up to 15 epochs (early stopping triggered after 7 epochs).
+- Learning rate = 3e‑4 (lower due to larger model capacity).
+- Same regularisation and class‑balancing as other models.
+
+#### Training Commonality
+All three models were trained with:
+- Batch size = 32.
+- Optimiser = Adam with weight decay (5e‑4).
+- Loss = class‑weighted CrossEntropyLoss + L1 penalty (1e‑5).
+- Learning rate scheduler = ReduceLROnPlateau (mode = 'max', patience = 2, factor = 0.5).
+- Early stopping = patience 4, monitoring validation AUC.
+- Data augmentation (training only): random rotation (±20°), horizontal flip, colour jitter.
+- WeightedRandomSampler and class weights to address imbalance.
 
 ---
 
